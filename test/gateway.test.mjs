@@ -923,7 +923,11 @@ test('Gateway /sessions command integrated with discovery (with mock)', async ()
       return sessions.map((session, index) => {
         return `${index + 1}. ${session.name} -- modified sometime ago`;
       }).join('\n');
-    }
+    },
+    rememberSessionListForChat: (chatId, sessionList) => {}, // Adding required methods for the integration
+    getSessionByIndex: (chatId, index) => null, // Dummy implementation
+    setActiveSessionForChat: (chatId, sessionPath) => {}, // Dummy implementation
+    validateSessionPath: (sessionPath) => true // Simple implementation for tests
   };
   
   const mockPi = new EventEmitter();
@@ -1044,4 +1048,323 @@ test('Other commands still show coming soon message', async () => {
   
   ok(messagesSent.length > 0, 'Should send reply for unimplemented command');
   ok(messagesSent.some(msg => msg.msg.includes('Coming soon')), 'Should show coming soon message for unimplemented command');
+});// Session Switching /use and /new command tests
+
+test('Gateway /new command calls new session RPC', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    piSessionDir: '/fake/path'
+  };
+  
+  let messageSent = null;
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messageSent = msg;
+    }
+  };
+  
+  let newSessionCalled = false;
+  const mockPi = {
+    newSession: async () => {
+      newSessionCalled = true;
+      return { success: true, session: null }; // mock return
+    }
+  };
+  
+  // Create the real SessionsManager for use with real methods
+  const { default: SessionsModuleClass } = await import('../src/sessions.mjs');
+  const sessionsManager = new SessionsModuleClass(mockConfig);
+  
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: sessionsManager, // Real object with all methods
+    clock: mockClock
+  });
+  
+  const newUpdate = {
+    update_id: 1,
+    message: {
+      text: '/new',
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(newUpdate);
+  
+  ok(newSessionCalled, 'Should call newSession on Pi client');
+  ok(messageSent && messageSent.includes('Created fresh Pi session'), 'Should send new session confirmation');
+});
+
+test('Gateway /use command with valid session ID switches session', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    piSessionDir: '/fake/sessions'
+  };
+  
+  let messageSent = null;
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messageSent = msg;
+    }
+  };
+  
+  let switchSessionCalledWith = null;
+  const mockPi = {
+    switchSession: async (sessionPath) => {
+      switchSessionCalledWith = sessionPath;
+      return { success: true, sessionPath };
+    }
+  };
+  
+  // Create the real SessionsManager for use with real methods
+  const { default: SessionsModuleClass } = await import('../src/sessions.mjs');
+  const sessionsManager = new SessionsModuleClass(mockConfig);
+  
+  const mockClock = {};
+  
+  // First, have the user get the session list to establish the available sessions
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: sessionsManager, // Real object with all methods
+    clock: mockClock
+  });
+  
+  // Simulate: /sessions first
+  const sessionsListForChat = [
+    { name: 'work-session', path: '/fake/sessions/work-session.jsonl', modifiedTime: new Date() },
+    { name: 'test-session', path: '/fake/sessions/test-session.jsonl', modifiedTime: new Date(Date.now() - 1000*60*60*2) }
+  ];
+  sessionsManager.rememberSessionListForChat(-5555, sessionsListForChat); // Manually seeding as if /sessions was called
+  
+  // Then: /use 1
+  const useUpdate = {
+    update_id: 2,
+    message: {
+      text: '/use 1', // Should refer to the first (index 0) session
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 } // Same chat ID
+    }
+  };
+  
+  await gateway.handleUpdate(useUpdate);
+  
+  ok(switchSessionCalledWith === '/fake/sessions/work-session.jsonl', 'Should call switchSession with first session');
+  ok(messageSent && messageSent.includes('Switched to Pi session: work-session'), 'Should send switch confirmation');
+});
+
+test('Gateway /use command with invalid session ID shows error', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    piSessionDir: '/fake/sessions'
+  };
+  
+  let messageSent = null;
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messageSent = msg;
+    }
+  };
+  
+  let switchSessionCalledWith = null;
+  const mockPi = {
+    switchSession: async (sessionPath) => {
+      switchSessionCalledWith = sessionPath;
+    }
+  };
+  
+  // Create the real SessionsManager for use with real methods
+  const { default: SessionsModuleClass } = await import('../src/sessions.mjs');
+  const sessionsManager = new SessionsModuleClass(mockConfig);
+  
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: sessionsManager, // Real object with all methods
+    clock: mockClock
+  });
+  
+  // Try /use with invalid session number before /sessions has been called
+  const useUpdate = {
+    update_id: 1,
+    message: {
+      text: '/use 999', // Invalid session index since no sessions established for this chat
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(useUpdate);
+  
+  ok(!switchSessionCalledWith, 'Should NOT call switchSession');
+  ok(messageSent && messageSent.includes('Session 999 not found'), 'Should send error about not finding session');
+});
+
+test('Gateway /use command with non-existent chat shows error', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    piSessionDir: '/fake/sessions'
+  };
+  
+  let messageSent = null;
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messageSent = msg;
+    }
+  };
+  
+  let switchSessionCalledWith = null;
+  const mockPi = {
+    switchSession: async (sessionPath) => {
+      switchSessionCalledWith = sessionPath;
+    }
+  };
+  
+  // Create the real SessionsManager for use with real methods
+  const { default: SessionsModuleClass } = await import('../src/sessions.mjs');
+  const sessionsManager = new SessionsModuleClass(mockConfig);
+  
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: sessionsManager, // Real object with all methods
+    clock: mockClock
+  });
+  
+  // Try /use before any /sessions command was issued means no chat session list exists
+  const useUpdate = {
+    update_id: 1,
+    message: {
+      text: '/use 1', // Session 1, but chat has no remembered sessions
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(useUpdate);
+  
+  ok(!switchSessionCalledWith, 'Should NOT call switchSession');
+  ok(messageSent && messageSent.includes('Session 1 not found'), 'Should send error due to missing session list');
+});
+
+test('Gateway /new command error handling', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    piSessionDir: '/fake/path'
+  };
+  
+  let messageSent = null;
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messageSent = msg;
+    }
+  };
+  
+  const mockPi = {
+    newSession: async () => {
+      throw new Error('Failed to create session');
+    }
+  };
+  
+  // Create the real SessionsDiscovery for use with real methods
+  const { default: SessionsDiscovery } = await import('../src/sessions.mjs');
+  const sessionsManager = new SessionsDiscovery(mockConfig);
+  
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: sessionsManager,
+    clock: mockClock
+  });
+  
+  const newUpdate = {
+    update_id: 1,
+    message: {
+      text: '/new',
+      from: { id: 123456 },
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(newUpdate);
+  
+  ok(messageSent && messageSent.includes('Could not create new session'), 'Should send error message on failure');
+});
+
+test('Gateway /use validates session filepath security', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    piSessionDir: '/safe/sessions/directory'
+  };
+  
+  let messageSent = null;
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messageSent = msg;
+    }
+  };
+  
+  let switchSessionCalledWith = null;
+  const mockPi = {
+    switchSession: async (sessionPath) => {
+      switchSessionCalledWith = sessionPath;
+    }
+  };
+  
+  // Create the real SessionsManager for use with real methods
+  const { default: SessionsModuleClass } = await import('../src/sessions.mjs');
+  const sessionsManager = new SessionsModuleClass(mockConfig);
+  
+  const mockClock = {};
+  
+  // Create a session list with a potentially malicious path
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: sessionsManager,
+    clock: mockClock
+  });
+  
+  // Inject a harmful-looking path via a simulated session discovery (for test purposes)
+  const sessionsListForChat = [
+    { name: 'malicious', path: '/etc/passwd.jsonl', modifiedTime: new Date() } // Outside allowed directory
+  ];
+  sessionsManager.rememberSessionListForChat(-5555, sessionsListForChat);
+  
+  // Try to use the potentially harmful session
+  const useUpdate = {
+    update_id: 2,
+    message: {
+      text: '/use 1',
+      from: { id: 123456 },
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(useUpdate);
+  
+  ok(!switchSessionCalledWith, 'Should NOT call switchSession with invalid path');
+  ok(messageSent && messageSent.includes('Invalid session path'), 'Should prevent path traversal attack');
 });

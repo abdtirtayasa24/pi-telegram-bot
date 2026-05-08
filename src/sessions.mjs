@@ -2,11 +2,14 @@ import { readdir, stat } from 'fs/promises';
 import { join, basename } from 'path';
 
 /**
- * Session Discovery module for finding and listing Pi session files
+ * Sessions Manager for finding, listing, switching, and validating Pi session files
  */
 class SessionsDiscovery {
   constructor(config) {
     this.config = config;
+    
+    // Track active session per chat (using chatId to store last loaded sessions and current session)
+    this.chatData = new Map(); // Maps chatId -> { activeSessionPath, sessionList, lastUpdateTimestamp }
   }
   
   /**
@@ -64,6 +67,76 @@ class SessionsDiscovery {
     }
     
     return result;
+  }
+  
+  /**
+   * Remember the latest session list for a specific chat
+   */
+  rememberSessionListForChat(chatId, sessionList) {
+    const chatInfo = this.chatData.get(chatId) || {};
+    chatInfo.sessionList = sessionList;
+    chatInfo.lastUpdateTimestamp = new Date();
+    this.chatData.set(chatId, chatInfo);
+  }
+  
+  /**
+   * Gets available session from the remembered list for this chat
+   */
+  getSessionListForChat(chatId) {
+    const chatInfo = this.chatData.get(chatId);
+    return chatInfo?.sessionList || [];
+  }
+  
+  /**
+   * Set the active session for a chat
+   */
+  setActiveSessionForChat(chatId, sessionPath) {
+    const chatInfo = this.chatData.get(chatId) || {};
+    chatInfo.activeSessionPath = sessionPath;
+    this.chatData.set(chatId, chatInfo);
+  }
+  
+  /**
+   * Get the active session for a chat
+   */
+  getActiveSessionForChat(chatId) {
+    const chatInfo = this.chatData.get(chatId);
+    return chatInfo?.activeSessionPath;
+  }
+  
+  /**
+   * Validate that path is within configured session directory (security check)
+   * @param {string} sessionPath - The path to validate
+   * @returns {boolean} True if path is valid
+   */
+  validateSessionPath(sessionPath) {
+    if (!sessionPath) return false;
+    
+    // Normalize the paths to avoid traversal attacks
+    const normalizedPath = join(sessionPath);  // Clean up the path
+    const normalizedSessionDir = join(this.config.piSessionDir);
+    
+    // Check if the sessionPath starts with the piSessionDir path
+    return normalizedPath.startsWith(normalizedSessionDir) && 
+           normalizedPath.toLowerCase().endsWith('.jsonl') &&
+           normalizedPath.includes(join(this.config.piSessionDir));
+  }
+  
+  /**
+   * Resolve a session by index from the chat's session list
+   * @param {number} chatId - Chat ID
+   * @param {number} sessionIndex - The 0-based index of the session
+   * @returns {Object|null} Session info or null if not valid
+   */
+  getSessionByIndex(chatId, sessionIndex) {
+    const sessionList = this.getSessionListForChat(chatId);
+    
+    // Adjust index to 0-based (as the user provides 1-based via /use 1)
+    if (sessionIndex >= 0 && sessionIndex < sessionList.length) {
+      return sessionList[sessionIndex];
+    }
+    
+    return null;
   }
   
   /**

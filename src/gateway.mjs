@@ -20,7 +20,7 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
       const chatId = update.message.chat?.id;
       
       // Check if the user is authorized
-      if (!userId || !config.telegramAllowedUserIds.includes(userId)) {
+      if (!userId || !config.telegramAllowedUserIds || !config.telegramAllowedUserIds.includes(userId)) {
         // Send unauthorized message to the user - need to access telegram client
         if (telegram && typeof telegram.sendMessage === 'function') {
           await telegram.sendMessage(chatId, 'You are not authorized to use this bot.');
@@ -87,7 +87,7 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
         return;
       }
       
-      // Enhanced dispatcher with sessions integration
+      // Enhanced dispatcher with session switching integration
       switch (commandLower) {
         case 'start':
           if (telegram && typeof telegram.sendMessage === 'function') {
@@ -117,6 +117,9 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
               const discoveredSessions = await sessions.discoverSessions();
               const formattedSessions = sessions.formatSessionsList(discoveredSessions);
               
+              // Remember session list for this chat so /use can reference it
+              sessions.rememberSessionListForChat(chatId, discoveredSessions);
+              
               if (telegram && typeof telegram.sendMessage === 'function') {
                 await telegram.sendMessage(chatId, `<b>Sessions:</b>\n${formattedSessions}`);
               }
@@ -133,8 +136,91 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
             }
           }
           break;
+        case 'use':  // Added for issue #7 - session switching
+          if (sessions && typeof sessions.getSessionByIndex === 'function' && 
+              pi && typeof pi.switchSession === 'function') {
+            // Extract session ID from command arguments
+            const args = messageText.split(' ').slice(1); // Get everything after command
+            const sessionId = args[0];
+            
+            if (!sessionId) {
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, 'Please specify a session number. Usage: /use <number>')
+              }
+              break;
+            }
+            
+            const sessionIndex = parseInt(sessionId, 10) - 1; // Convert to 0-based index
+            if (isNaN(sessionIndex) || sessionIndex < 0) {
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Invalid session number: ${sessionId}`);
+              }
+              break;
+            }
+            
+            // Get the session from the remembered list for this chat
+            const selectedSession = sessions.getSessionByIndex(chatId, sessionIndex);
+            if (!selectedSession) {
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Session ${sessionId} not found. Run /sessions first to see available sessions.`);
+              }
+              break;
+            }
+            
+            // Validate the path to prevent traversal attacks
+            if (!sessions.validateSessionPath(selectedSession.path)) {
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Invalid session path: ${selectedSession.path}`);
+              }
+              break;
+            }
+            
+            // Try to switch to the selected session
+            try {
+              await pi.switchSession(selectedSession.path);
+              sessions.setActiveSessionForChat(chatId, selectedSession.path);
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Switched to Pi session: ${selectedSession.name}`);
+              }
+            } catch (error) {
+              console.error('Error switching Pi session:', error);
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Could not switch to session: ${error.message}`);
+              }
+            }
+            
+          } else {
+            // Fallback if any dependencies are missing
+            if (telegram && typeof telegram.sendMessage === 'function') {
+              await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
+            }
+          }
+          break;
+        case 'new':  // Added for issue #7 - create new session
+          if (pi && typeof pi.newSession === 'function') {
+            try {
+              await pi.newSession();
+              if (sessions && typeof sessions.setActiveSessionForChat === 'function') {
+                sessions.setActiveSessionForChat(chatId, null); // Clear active session since we started new
+              }
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Created fresh Pi session. Ready to begin new work.`);
+              }
+            } catch (error) {
+              console.error('Error creating new Pi session:', error);
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Could not create new session: ${error.message}`);
+              }
+            }
+          } else {
+            // Fallback if dependencies are missing
+            if (telegram && typeof telegram.sendMessage === 'function') {
+              await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
+            }
+          }
+          break;
         default:
-          // For other commands (use, new, name, current), 
+          // For remaining commands (name, current), 
           // we'll implement them in future issues
           if (telegram && typeof telegram.sendMessage === 'function') {
             await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
