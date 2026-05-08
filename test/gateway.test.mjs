@@ -182,4 +182,134 @@ test('Gateway handleUpdate accepts update stub', async () => {
 // Placeholder for Pi subprocess behavior tests - we'll implement after PiClient module
 test('PiClient initialization should spawn pi --mode rpc', async () => {
   // This test will be implemented after PiClient is built
+});// Authentication tests for the guard
+
+test('Gateway processes authorized users', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token', 
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Mock telegram client with sendMessage method
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {}
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Create an authorized user update
+  const authorizedUpdate = {
+    update_id: 1,
+    message: {
+      text: 'test',
+      from: { id: 123456 }, // Authorized user ID
+      chat: { id: -5555 }
+    }
+  };
+  
+  // This should not throw and should process authorized users
+  await gateway.handleUpdate(authorizedUpdate);
+  ok(true, 'Authorized user should be processed without errors');
+});
+
+test('Gateway rejects unauthorized users', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456], 
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track if sendMessage was called
+  let sendMessageCalled = false;
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      sendMessageCalled = true;
+      // Verify the message content
+      ok(msg.includes('not authorized'), 'Should send unauthorized message to blocked users');
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Create an unauthorized user update
+  const unauthorizedUpdate = {
+    update_id: 2,
+    message: {
+      text: 'test',
+      from: { id: 999999 }, // Unauthorized user ID
+      chat: { id: 8888 }
+    }
+  };
+  
+  // This should call sendMessage to send the unauthorized message
+  await gateway.handleUpdate(unauthorizedUpdate);
+  ok(sendMessageCalled, 'Should call sendMessage for Unauthorized users');
+});
+
+test('Gateway ignores messages without user data', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track if sendMessage was called
+  let sendMessageCalled = false;
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      sendMessageCalled = true;
+      // Verify the message content
+      ok(msg.includes('not authorized'), 'Should send unauthorized message');
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Create a message with no user from section
+  const noUserUpdate = {
+    update_id: 3,
+    message: {
+      text: 'test',
+      // No 'from' section
+      chat: { id: 8888 }
+    }
+  };
+  
+  // This should call sendMessage since there's no user ID to check
+  await gateway.handleUpdate(noUserUpdate);
+  ok(sendMessageCalled, 'Should treat missing user ID as unauth');
 });

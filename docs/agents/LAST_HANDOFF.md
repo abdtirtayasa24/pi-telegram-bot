@@ -1,22 +1,18 @@
 # Last Handoff
 
 ## Session Status
-Completed issue #2 - MVP: Telegram long polling client
+Completed issue #3 - MVP: Telegram Auth Guard
 
 ## What Changed
-- Implemented full Telegram client with long polling capabilities using Node fetch
-- Created complete polling loop with update tracking via message offset
-- Added gateway update format conversion for Telegram updates
-- Built error handling for network issues
-- Added functionality to maintain position in the update queue
-- Updated main index to integrate all services properly
-- Created comprehensive test suite for long polling behavior
+- Implemented authorization guard that checks Telegram user id against allowed IDs from config
+- Created middleware to reject unauthorized users with standardized message
+- Added logic for allowing authorized users to proceed to command processing
+- Enhanced logging to capture attempt metadata for authorized users only
+- Added comprehensive test suite verifying auth behavior with both authorized and unauthorized users
 
 ## Files Changed
-- `src/telegram-client.mjs`: Complete implementation of Telegram long polling client
-- `src/index.mjs`: Main application entry point wiring services together
-- `test/telegram-client.test.mjs`: Complete test suite for Telegram client functionality
-- `src/gateway.mjs`: Updated to work with integrated Telegram client
+- `src/gateway.mjs`: Added authorization logic to handleUpdate method
+- `test/gateway.test.mjs`: Added tests for authentication guard functionality
 
 ## Tests Run  
 - All configuration validation tests: PASS
@@ -24,8 +20,9 @@ Completed issue #2 - MVP: Telegram long polling client
 - PiClient subprocess spawning tests: PASS
 - Telegram client conversion tests: PASS
 - Telegram client polling mechanism tests: PASS
-- Telegram client error handling tests: PASS 
-- Total: 13/13 tests passing
+- Telegram client error handling tests: PASS
+- Authentication guard functionality tests: PASS
+- Total: 16/16 tests passing
 
 ## Suggested Next Issue
-Issue #3: MVP: Telegram Auth Guard - Implement middleware to check incoming messages from authorized Telegram user IDs and reject untrusted users, using the allowlist from TELEGRAM_ALLOWED_USER_IDS
+Issue #4: MVP: Command Processing - Build a command router that inspects message text for commands vs prompts, handles the /help and /start commands specifically, and prepares for other commands like session management. Commands start with '/'. Non-commands should go to prompt routing (to be implemented in later issues).
