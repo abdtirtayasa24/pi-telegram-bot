@@ -87,10 +87,37 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
         return;
       }
       
-      // Dispatch to specific command handlers (to be implemented in future issues)
-      // For now, we'll respond saying the command handler is coming in future issues
-      if (telegram && typeof telegram.sendMessage === 'function') {
-        await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
+      // Dispatch to specific command handlers
+      switch (commandLower) {
+        case 'start':
+          if (telegram && typeof telegram.sendMessage === 'function') {
+            await telegram.sendMessage(chatId, 'Pi Telegram Bot is ready. Send a message to prompt Pi, or /help for commands.');
+          }
+          break;
+        case 'help':
+          if (telegram && typeof telegram.sendMessage === 'function') {
+            const helpText = [
+              '<b>Pi Telegram Bot Commands:</b>',
+              '',
+              '<b>/start</b> - Display welcome message',
+              '<b>/help</b> - Show this help message',
+              '<b>/sessions</b> - List available Pi sessions',
+              '<b>/use &lt;id&gt;</b> - Switch to an existing session',
+              '<b>/new</b> - Create a new session',
+              '<b>/name &lt;text&gt;</b> - Set the current session name',
+              '<b>/current</b> - Show the active session info',
+              ''
+            ].join('\n');
+            await telegram.sendMessage(chatId, helpText);
+          }
+          break;
+        default:
+          // For other commands (sessions, use, new, name, current), 
+          // we'll implement them in future issues
+          if (telegram && typeof telegram.sendMessage === 'function') {
+            await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
+          }
+          break;
       }
     },
 
