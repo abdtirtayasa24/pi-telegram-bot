@@ -87,7 +87,7 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
         return;
       }
       
-      // Enhanced dispatcher with session switching integration
+      // Enhanced dispatcher with session naming and status integration
       switch (commandLower) {
         case 'start':
           if (telegram && typeof telegram.sendMessage === 'function') {
@@ -219,9 +219,87 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
             }
           }
           break;
+        case 'name':  // Added for issue #8 - session naming
+          if (pi && typeof pi.getState === 'function' && typeof pi.send === 'function') {
+            const args = messageText.split(' ').slice(1); // Get everything after command
+            const nameText = args.join(' ').trim();
+            
+            if (!nameText) {
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, 'Please specify a session name. Usage: /name <text>')
+              }
+              break;
+            }
+            
+            // Trim to max 80 characters as per requirements
+            let finalName = nameText;
+            if (nameText.length > 80) {
+              finalName = nameText.substring(0, 80);
+              console.log(`Truncating session name from ${nameText.length} to 80 characters`);
+            }
+            
+            try {
+              // Send as set_session_name command to Pi
+              await pi.send({ type: 'set_session_name', name: finalName });
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Session name updated to: ${finalName}`);
+              }
+            } catch (error) {
+              console.error('Error setting session name:', error);
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Could not set session name: ${error.message}`);
+              }
+            }
+            
+          } else {
+            // Fallback if dependencies are missing
+            if (telegram && typeof telegram.sendMessage === 'function') {
+              await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
+            }
+          }
+          break;
+        case 'current':  // Added for issue #8 - session status
+          if (pi && typeof pi.getState === 'function') {
+            try {
+              const state = await pi.getState();
+              
+              let displayName = 'unnamed';
+              if (state.sessionName) {
+                displayName = state.sessionName;
+              } else if (state.sessionFile) {
+                // Extract basename without path for privacy
+                const pathParts = state.sessionFile.split(/[\\/]/);
+                displayName = pathParts[pathParts.length - 1].replace(/\.jsonl$/, '');
+              }
+              
+              // Format session status details
+              const statusLines = [
+                `<b>Current Pi Session:</b>`,
+                `Name: ${displayName}`,
+                `ID: ${state.sessionId || 'unknown'}`,
+                `Streaming: ${state.isStreaming ? 'YES' : 'NO'}`,
+                `Model: ${state.currentModel || 'default'}`,
+                `Messages: ${state.messageCount || 0}`,
+                `Last Active: ${(new Date(state.lastInteraction * 1000 || Date.now())).toLocaleString()}`
+              ];
+              
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, statusLines.join('\n'));
+              }
+            } catch (error) {
+              console.error('Error getting session state:', error);
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `Could not get session status: ${error.message}`);
+              }
+            }
+          } else {
+            // Fallback if dependencies are missing
+            if (telegram && typeof telegram.sendMessage === 'function') {
+              await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
+            }
+          }
+          break;
         default:
-          // For remaining commands (name, current), 
-          // we'll implement them in future issues
           if (telegram && typeof telegram.sendMessage === 'function') {
             await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
           }
