@@ -4,6 +4,7 @@ import { loadConfig } from './config.mjs';
 import { createBotGateway } from './gateway.mjs';
 import TelegramClient from './telegram-client.mjs';
 import PiClient from './pi-client.mjs';
+import SessionsDiscovery from './sessions.mjs';
 
 async function main() {
   // Load config
@@ -17,8 +18,8 @@ async function main() {
   // Create Telegram client
   const telegramClient = new TelegramClient(config);
   
-  // Create empty session manager (will be implemented in future issues)
-  const sessionManager = {};
+  // Create session discovery manager
+  const sessionManager = new SessionsDiscovery(config);
   
   // Create clock utility (will be implemented in future issues)
   const clock = {};

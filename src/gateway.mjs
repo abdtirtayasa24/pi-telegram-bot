@@ -87,7 +87,7 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
         return;
       }
       
-      // Dispatch to specific command handlers
+      // Enhanced dispatcher with sessions integration
       switch (commandLower) {
         case 'start':
           if (telegram && typeof telegram.sendMessage === 'function') {
@@ -111,8 +111,30 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
             await telegram.sendMessage(chatId, helpText);
           }
           break;
+        case 'sessions':  // Added for issue #6
+          if (sessions && typeof sessions.discoverSessions === 'function') {  // sessions manager object with required methods
+            try {
+              const discoveredSessions = await sessions.discoverSessions();
+              const formattedSessions = sessions.formatSessionsList(discoveredSessions);
+              
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, `<b>Sessions:</b>\n${formattedSessions}`);
+              }
+            } catch (error) {
+              console.error('Error discovering sessions:', error);
+              if (telegram && typeof telegram.sendMessage === 'function') {
+                await telegram.sendMessage(chatId, 'Error listing sessions. Please check logs.');
+              }
+            }
+          } else {
+            // Fall back to coming soon message for testing when sessions manager unavailable
+            if (telegram && typeof telegram.sendMessage === 'function') {
+              await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);
+            }
+          }
+          break;
         default:
-          // For other commands (sessions, use, new, name, current), 
+          // For other commands (use, new, name, current), 
           // we'll implement them in future issues
           if (telegram && typeof telegram.sendMessage === 'function') {
             await telegram.sendMessage(chatId, `Command '${commandLower}' received. Coming soon in upcoming issues.`);

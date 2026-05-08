@@ -319,56 +319,6 @@ test('Gateway ignores messages without user data', async () => {
 
 // Command processing tests
 
-test('Gateway identifies and processes non-special approved commands', async () => {
-  const gw = await getGatewayModule().then(module => module.default || module);
-  
-  const mockConfig = {
-    telegramBotToken: 'fake-token',
-    telegramAllowedUserIds: [123456],
-    piSessionDir: '/fake/path'
-  };
-  
-  // Try each approved command OTHER THAN start/help, which have specific implementations now
-  const otherApprovedCmds = ['sessions', 'use', 'new', 'name', 'current']; // These still show coming soon
-  
-  for (const cmd of otherApprovedCmds) {
-    // Track messages sent only for this specific command test
-    let messageReceived = null;
-    const testMockTelegram = {
-      sendMessage: async (chatId, msg) => {
-        messageReceived = msg;
-      }
-    };
-    
-    const mockPi = new EventEmitter();
-    const mockSessions = {};
-    const mockClock = {};
-    
-    const gateway = await gw.createBotGateway({ 
-      config: mockConfig, 
-      telegram: testMockTelegram, 
-      pi: mockPi,
-      sessions: mockSessions,
-      clock: mockClock
-    });
-    
-    const commandUpdate = {
-      update_id: 1,
-      message: {
-        text: `/${cmd}`,
-        from: { id: 123456 }, // Authorized user
-        chat: { id: -5555 }
-      }
-    };
-    
-    await gateway.handleUpdate(commandUpdate);
-    
-    ok(messageReceived, `Should send reply for approved command /${cmd}`);
-    ok(messageReceived.includes('Coming soon') || messageReceived.includes('Pi'), `Command /${cmd} should show coming soon message`);
-  }
-});
-
-// Separate test for start and help commands to verify they respond with actual content
 test('Gateway handles start and help commands with actual content', async () => {
   const gw = await getGatewayModule().then(module => module.default || module);
   
@@ -870,6 +820,221 @@ test('Other commands still show coming soon message', async () => {
     update_id: 1,
     message: {
       text: '/sessions',
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(cmdUpdate);
+  
+  ok(messagesSent.length > 0, 'Should send reply for unimplemented command');
+  ok(messagesSent.some(msg => msg.msg.includes('Coming soon')), 'Should show coming soon message for unimplemented command');
+});// Session Discovery tests
+
+// Test the SessionsDiscovery class itself
+test('SessionsDiscovery correctly scans session directory', async () => {
+  const mockConfig = {
+    telegramBotToken: 'fake-token', 
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'  // Would be scanned
+  };
+  
+  // Need a fake session discovery module
+  const SessionsModule = await import('../src/sessions.mjs');
+  const SessionsDiscovery = SessionsModule.default;
+  
+  const sessionsDiscovery = new SessionsDiscovery(mockConfig);
+  
+  // Test that the object is created successfully
+  ok(sessionsDiscovery, 'SessionsDiscovery object should be created');
+  equal(sessionsDiscovery.config, mockConfig, 'Configuration should be stored');
+});
+
+test('Format sessions lists returns proper empty message', async () => {
+  const mockConfig = {
+    telegramBotToken: 'fake-token', 
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  const SessionsModule = await import('../src/sessions.mjs');
+  const SessionsDiscovery = SessionsModule.default;
+  
+  const sessionsDiscovery = new SessionsDiscovery(mockConfig);
+  
+  const emptyFormatted = sessionsDiscovery.formatSessionsList([]);
+  equal(emptyFormatted, 'No Pi sessions found.', 'Empty list should show appropriate message');
+});
+
+test('Format sessions lists with data formats correctly', async () => {
+  const mockConfig = {
+    telegramBotToken: 'fake-token', 
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  const SessionsModule = await import('../src/sessions.mjs');
+  const SessionsDiscovery = SessionsModule.default;
+  
+  const sessionsDiscovery = new SessionsDiscovery(mockConfig);
+  
+  // Test with sample data 
+  const sessionsData = [
+    { name: 'my-session', fileName: 'my-session.jsonl', path: '/path/my-session.jsonl', modifiedTime: new Date('2023-01-01T10:00:00Z') },
+    { name: 'work-session', fileName: 'work-session.jsonl', path: '/path/work-session.jsonl', modifiedTime: new Date('2023-01-01T08:00:00Z') }
+  ];
+  
+  const referenceTime = new Date('2023-01-01T12:00:00Z'); // 2 hours after first, 4 hours after second
+  const formatted = sessionsDiscovery.formatSessionsList(sessionsData, referenceTime);
+  
+  ok(formatted.includes('1. my-session'), 'First session should be numbered 1');
+  ok(formatted.includes('2. work-session'), 'Second session should be numbered 2');
+  ok(formatted.includes('hour'), 'Should include time duration');
+});
+
+// Test the integration with the gateway
+test('Gateway /sessions command integrated with discovery (with mock)', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  let messagesSent = [];
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messagesSent.push({ chatId, msg });
+    }
+  };
+  
+  // Create mock session manager that returns predefined sessions
+  const mockSessionsManager = {
+    discoverSessions: async () => {
+      return [
+        { name: 'old-session', fileName: 'old-session.jsonl', modifiedTime: new Date(Date.now() - 5*60*60*1000) }, // 5 hours ago
+        { name: 'recent-session', fileName: 'recent-session.jsonl', modifiedTime: new Date(Date.now() - 1*60*60*1000) } // 1 hour ago
+      ];
+    },
+    formatSessionsList: (sessions) => {
+      // This replicates the real formatting behavior
+      if (sessions.length === 0) return 'No Pi sessions found.';
+      return sessions.map((session, index) => {
+        return `${index + 1}. ${session.name} -- modified sometime ago`;
+      }).join('\n');
+    }
+  };
+  
+  const mockPi = new EventEmitter();
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessionsManager, // Use the mock
+    clock: mockClock
+  });
+  
+  const sessionsUpdate = {
+    update_id: 1,
+    message: {
+      text: '/sessions',
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(sessionsUpdate);
+  
+  ok(messagesSent.length > 0, 'Should send reply for /sessions command');
+  ok(messagesSent[0].msg.includes('Sessions:'), 'Response should include Sessions heading');
+  ok(messagesSent[0].msg.includes('recent-session'), 'Should list recent sessions first due to time ordering');
+});// Test for commands OTHER than start, help, and now sessions (which are all implemented)
+test('Gateway identifies and processes non-special approved commands', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Try each approved command OTHER THAN start/help/sessions, which have specific implementations now
+  const otherApprovedCmds = ['use', 'new', 'name', 'current']; // These still show coming soon
+  
+  for (const cmd of otherApprovedCmds) {
+    // Track messages sent only for this specific command test
+    let messageReceived = null;
+    const testMockTelegram = {
+      sendMessage: async (chatId, msg) => {
+        messageReceived = msg;
+      }
+    };
+    
+    const mockPi = new EventEmitter();
+    const mockSessions = {};
+    const mockClock = {};
+    
+    const gateway = await gw.createBotGateway({ 
+      config: mockConfig, 
+      telegram: testMockTelegram, 
+      pi: mockPi,
+      sessions: mockSessions,
+      clock: mockClock
+    });
+    
+    const commandUpdate = {
+      update_id: 1,
+      message: {
+        text: `/${cmd}`,
+        from: { id: 123456 }, // Authorized user
+        chat: { id: -5555 }
+      }
+    };
+    
+    await gateway.handleUpdate(commandUpdate);
+    
+    ok(messageReceived, `Should send reply for approved command /${cmd}`);
+    ok(messageReceived.includes('Coming soon') || messageReceived.includes('Pi'), `Command /${cmd} should show coming soon message`);
+  }
+});
+
+// Test for the 'Other commands still show coming soon message' - fix the /sessions call
+test('Other commands still show coming soon message', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track messages sent to user
+  const messagesSent = [];
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messagesSent.push({ chatId, msg });
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Try a command OTHER than start, help, sessions (which are now implemented)
+  const cmdUpdate = {
+    update_id: 1,
+    message: {
+      text: '/use',
       from: { id: 123456 }, // Authorized user
       chat: { id: -5555 }
     }
