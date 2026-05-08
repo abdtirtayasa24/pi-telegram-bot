@@ -1,9 +1,226 @@
 /**
- * Create the Bot Gateway with injected dependencies
+ * Create the Bot Gateway with injected dependencies for response routing
  */
 export async function createBotGateway({ config, telegram, pi, sessions, clock }) {
-  // Keep a queue of pending prompts (per chat or globally - to be refined later as needed)
-  const pendingPrompts = [];
+  // Keep a queue of pending prompt jobs per chat with correlation information
+  const pendingPromptJobs = new Map(); // Maps chatId -> array of pending job info with text buffer
+  let nextRequestId = 1;
+  let jobsById = new Map();  // Maps request ID -> job metadata for correlation
+  let activeJobQueue = [];  // Queue of jobs corresponding to requests sent to Pi in order
+
+  // Store references to be able to unsubscribe events when needed
+  let onPiEvent = null;
+
+  const addPendingJob = (chatId, requestId, originalMessage = '') => {
+    const jobId = nextRequestId++;
+    const job = {
+      id: jobId,
+      requestId,
+      chatId,
+      originalMessage,
+      textBuffer: '',  // To collect response as it arrives
+      timestamp: Date.now()
+    };
+    
+    jobsById.set(jobId, job);
+    
+    // Add to chat-sorted collection
+    if (!pendingPromptJobs.has(chatId)) {
+      pendingPromptJobs.set(chatId, []);
+    }
+    pendingPromptJobs.get(chatId).push(job);
+    
+    // Also add to global active queue to track the order requests were sent
+    activeJobQueue.push(job);
+    
+    return job;
+  };
+
+  const removePendingJob = (jobId) => {
+    if (!jobsById.has(jobId)) return;
+    
+    const job = jobsById.get(jobId);
+    const {chatId} = job;
+    
+    // Remove from jobs by ID
+    jobsById.delete(jobId);
+    
+    // Remove from chat-sorted collection
+    if (pendingPromptJobs.has(chatId)) {
+      const jobs = pendingPromptJobs.get(chatId);
+      const index = jobs.findIndex(j => j.id === jobId);
+      if (index !== -1) {
+        jobs.splice(index, 1);
+      }
+      if (jobs.length === 0) {
+        pendingPromptJobs.delete(chatId);
+      }
+    }
+    
+    // Remove from active job queue too if present
+    const queueIndex = activeJobQueue.findIndex(j => j.id === jobId);
+    if (queueIndex !== -1) {
+      activeJobQueue.splice(queueIndex, 1);
+    }
+  };
+
+  const getJobsForChat = (chatId) => {
+    return pendingPromptJobs.get(chatId) || [];
+  };
+
+  const clearChatJobs = (chatId) => {
+    const jobs = pendingPromptJobs.get(chatId) || [];
+    for (const job of jobs) {
+      jobsById.delete(job.id);
+      // Also remove from active queue
+      const queueIndex = activeJobQueue.findIndex(j => j.id === job.id);
+      if (queueIndex !== -1) {
+        activeJobQueue.splice(queueIndex, 1);
+      }
+    }
+    pendingPromptJobs.delete(chatId);
+  };
+
+  // Set up Pi event listeners when Pi client is available
+  if (pi) {
+    onPiEvent = (eventObj) => {
+      try {
+        handlePiEvent(eventObj);
+      } catch (error) {
+        console.error('Error handling Pi event:', error);
+      }
+    };
+    
+    // Subscribe to Pi events
+    pi.on('event', onPiEvent);
+  }
+
+  // Function to handle Pi events and update job buffers
+  const handlePiEvent = (eventObj) => {
+    if (eventObj.type === 'agent_start') {
+      console.log('Pi started processing a request');
+    } else if (eventObj.type === 'message_update') {
+      const content = eventObj.data?.content || '';
+      // Add content to the *next* job in line that's getting Pi's attention
+      // Since Pi processes one active session sequentially, we get responses back in a queue
+      if (activeJobQueue.length > 0) {
+        // Use FIFO - the first job in the queue that hasn't yet been processed is the one receiving content
+        const jobReceivingResponse = activeJobQueue[0];
+        jobReceivingResponse.textBuffer += content;
+      }
+    } else if (eventObj.type === 'agent_end') {
+      // When agent ends, the current job at the front of the queue is completed
+      if (activeJobQueue.length > 0) {
+        const completedJob = activeJobQueue.shift(); // Remove and get first job in queue
+        
+        // Send the completed response to the respective chat
+        if (completedJob) {
+          const responseText = completedJob.textBuffer;
+          
+          // Send response to the original originating chat
+          if (responseText.trim()) {
+            sendTelegramResponse(telegram, completedJob.chatId, responseText);
+          } else {
+            sendTelegramResponse(telegram, completedJob.chatId, 'Pi finished without a text response.');
+          }
+          
+          // Clean up: remove this job
+          removePendingJob(completedJob.id);
+        }
+      }
+    }
+  };
+
+  // Helper to send response with chunking and proper sanitization
+  const sendTelegramResponse = async (tg, chatId, response) => {
+    if (!tg || !chatId) return;
+    
+    try {
+      // Sanitize response text to remove potential secrets
+      let sanitizedResponse = sanitizeResponse(response);
+      
+      // Split message into chunks respecting the character limit
+      // Telegram allows up to 4096 characters so we stay well under at 3900
+      const maxLength = 3900;
+      
+      if (sanitizedResponse.length <= maxLength) {
+        // Short response can go directly
+        await tg.sendMessage(chatId, sanitizedResponse);
+        return;
+      }
+      
+      // For long messages, break into reasonable chunks
+      let remaining = sanitizedResponse;
+      while (remaining.length > 0) {
+        let chunk;
+        if (remaining.length <= maxLength) {
+          chunk = remaining;
+          remaining = '';
+        } else {
+          // Try to find a suitable breakpoint around the max length
+          let cutPoint = maxLength;
+          
+          // Try cutting before punctuation marks if possible
+          for (let i = maxLength; i > maxLength - 500; i--) {
+            if (['. ', '! ', '? ', '\n', '\n\n'].some(breakChar => 
+                remaining.slice(i - 5, i + 1).includes(breakChar))) {
+              cutPoint = i + 1;
+              break;
+            }
+          }
+          
+          chunk = remaining.substring(0, cutPoint);
+          if (chunk.length < maxLength * 0.8) {  // If we couldn't find a good cut point, just cut
+            chunk = remaining.substring(0, maxLength);
+          }
+          remaining = remaining.substring(chunk.length);
+        }
+        
+        if (chunk.trim()) {
+          await tg.sendMessage(chatId, chunk);
+        }
+        
+        // Small delay to be respectful to API
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    } catch (error) {
+      // Use safe error instead of exposing internals
+      console.error('Error sending response to Telegram:', error);
+      try {
+        await tg.sendMessage(chatId, 'Pi response could not be delivered due to a connectivity issue.');
+      } catch (sendError) {
+        console.error('Could not even send safe error:', sendError);
+      }
+    }
+  };
+
+  // Helper to sanitize response to remove secrets, paths, etc.
+  const sanitizeResponse = (response) => {
+    if (!response) return 'Pi finished without a text response.';
+    
+    let sanitized = response.toString();
+    
+    // Remove common path patterns that could leak system details
+    sanitized = sanitized.replace(/(\/[\w\-\.\/]+\/[\w\-\.]*\.[\w]{1,10}(?=\s|$))/g, '<PATH_REMOVED>');
+    sanitized = sanitized.replace(/([A-Z]:\\+(?:[\w\-\.\\]+\\)*[\w\-\.]*\.[\w]{1,10}(?=\s|$))/gi, '<PATH_REMOVED>');
+    
+    // Remove potential API keys or credential patterns
+    sanitized = sanitized.replace(/\b(token|api[-_]?key|api[-_]?secret|password|pass|pwd|api|session)[\s:=\`"']+\s*\`*["']?\s*[\w-]{20,}["']?\s*\`*/gi, '<CREDENTIAL_REMOVED>');
+    
+    // Sanitize potential secrets in config format
+    sanitized = sanitized.replace(/(env|environment|\.env|secret[s]?)[\s:=]+"?.*?(["\s]|$)/gi, (match, p1) => `${p1}: <REDACTED>`);
+    
+    // Avoid revealing raw stack traces or internal errors
+    sanitized = sanitized.replace(/(at\s+[^\s]+\s+\[as\s+)?[^\s\)]+\.js:\d+:\d+/g, '[INTERNAL]');
+    
+    // Apply final length cap - this is our final safeguard
+    sanitized = sanitized.substring(0, 4000);
+    if (response.length > 4000) {
+      sanitized += '... [TEXT_TRUNCATED_FOR_SECURITY]';
+    }
+    
+    return sanitized;
+  };
 
   return {
     /**
@@ -53,6 +270,9 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
       // Forward the message as a prompt to Pi client if it's available
       if (pi && typeof pi.prompt === 'function' && typeof pi.getIsStreaming === 'function') {
         try {
+          // Create a job to track the response for this chat
+          const job = addPendingJob(chatId, nextRequestId++, messageText);
+          
           const isStreaming = pi.getIsStreaming();
           
           if (isStreaming) {
@@ -76,8 +296,16 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
           }
         } catch (error) {
           console.error('Error sending normal text as prompt to Pi:', error);
+          
+          // Remove job if there was an error to avoid hanging entries
+          // This is simplified - a more robust solution would track specific job ID
+          clearChatJobs(chatId);
+          
           if (telegram && typeof telegram.sendMessage === 'function') {
-            await telegram.sendMessage(chatId, `Sorry, couldn't send message to Pi: ${error.message}`);
+            // Send safe error without exposing internal details
+            const safeError = 'Could not send message to Pi due to a connection issue.';
+            await telegram.sendMessage(chatId, safeError);
+            console.error('Safe error sent to chat:', safeError);
           }
         }
       } else {
@@ -338,14 +566,16 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
       }
     },
 
-    // Additional helper methods will be added here
-    // For now, we just need the basic structure to match our tests
-    
     /**
      * Stop the gateway
      */
     async stop() {
       console.log('Stopping Bot Gateway');
+      // Cleanup event listener if set
+      if (pi && onPiEvent) {
+        pi.removeListener('event', onPiEvent);
+        onPiEvent = null;
+      }
     }
   };
 }
