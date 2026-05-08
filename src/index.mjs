@@ -54,21 +54,21 @@ async function main() {
       await telegramClient.stop();
       console.log('Telegram client stopped');
     } catch (e) {
-      console.error('Error stopping Telegram client:', e);
+      logProductionError('TELEGRAM_SHUTDOWN_ERROR', e);
     }
     
     try {
       await piClient.close();
       console.log('Pi client disconnected');
     } catch (e) {
-      console.error('Error stopping Pi client:', e);
+      logProductionError('PI_CLIENT_SHUTDOWN_ERROR', e);
     }
     
     try {
       await gateway.stop();
       console.log('Gateway shut down');
     } catch (e) {
-      console.error('Error stopping gateway:', e);
+      logProductionError('GATEWAY_SHUTDOWN_ERROR', e);
     }
     
     process.exit(0);
@@ -77,16 +77,33 @@ async function main() {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   process.on('uncaughtException', (err) => {
-    console.error('Uncaught exception:', err);
+    logProductionError('UNCAUGHT_EXCEPTION', err);
     shutdown();
   });
   process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled rejection:', reason, promise);
+    logProductionError('UNHANDLED_REJECTION', {
+      reason: reason instanceof Error ? reason : new Error(String(reason)),
+      promise
+    });
     shutdown();
   });
 }
 
+// Enhanced error logging for production
+function logProductionError(context, error) {
+  const timestamp = new Date().toISOString();
+  const errorInfo = {
+    timestamp,
+    context,
+    message: error.message,
+    stack: error.stack,
+    type: error.constructor.name
+  };
+  // In production you might want to send logs elsewhere
+  console.error(`${timestamp} - ${context}:`, JSON.stringify(errorInfo, null, 2));
+}
+
 main().catch(err => {
-  console.error('Application error:', err);
+  logProductionError('APPLICATION_ERROR', err);
   process.exit(1);
 });
