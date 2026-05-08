@@ -47,13 +47,31 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
         return; // Don't pass commands to other processing
       }
       
-      // This is a normal message, which would go to Pi in later implementations
-      console.log('Received normal message from authorized user (will go to Pi later):', messageText);
+      // This is a normal message, which goes to Pi as a prompt
+      console.log('Received normal text message from authorized user:', messageText);
       
-      // For now, we'll just send back an acknowledgment that the message is recognized
-      // and will be processed in later issues
-      if (telegram && typeof telegram.sendMessage === 'function') {
-        await telegram.sendMessage(chatId, 'Message received by Pi. (Normal text routing implemented in issue #9)');
+      // Forward the message as a prompt to Pi client if it's available
+      if (pi && typeof pi.prompt === 'function') {
+        try {
+          // Send the original text as a prompt using Pi's prompt RPC command
+          await pi.prompt(messageText);
+          console.log('Normal text sent to Pi as prompt:', messageText);
+          
+          // Optional: Acknowledge the message was received by Pi
+          if (telegram && typeof telegram.sendMessage === 'function') {
+            await telegram.sendMessage(chatId, 'Message sent to Pi for processing.');
+          }
+        } catch (error) {
+          console.error('Error sending normal text as prompt to Pi:', error);
+          if (telegram && typeof telegram.sendMessage === 'function') {
+            await telegram.sendMessage(chatId, `Sorry, couldn't send message to Pi: ${error.message}`);
+          }
+        }
+      } else {
+        // Fallback if Pi client not available
+        if (telegram && typeof telegram.sendMessage === 'function') {
+          await telegram.sendMessage(chatId, 'Message received by gateway (Pi client not available).');
+        }
       }
     },
     
