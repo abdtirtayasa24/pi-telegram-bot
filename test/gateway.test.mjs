@@ -312,4 +312,301 @@ test('Gateway ignores messages without user data', async () => {
   // This should call sendMessage since there's no user ID to check
   await gateway.handleUpdate(noUserUpdate);
   ok(sendMessageCalled, 'Should treat missing user ID as unauth');
+});// Command processing tests
+
+test('Gateway identifies and processes approved commands', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track messages sent to user
+  const messagesSent = [];
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messagesSent.push({ chatId, msg });
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Try each approved command
+  const approvedCmds = ['start', 'help', 'sessions', 'use', 'new', 'name', 'current'];
+  
+  for (const cmd of approvedCmds) {
+    messagesSent.length = 0; // Clear messages
+    const commandUpdate = {
+      update_id: 1,
+      message: {
+        text: `/${cmd}`,
+        from: { id: 123456 }, // Authorized user
+        chat: { id: -5555 }
+      }
+    };
+    
+    await gateway.handleUpdate(commandUpdate);
+    
+    ok(messagesSent.length > 0, `Should send reply for approved command /${cmd}`);
+    ok(messagesSent.some(msg => msg.msg.includes('Coming soon')), `Approved command should show coming soon message`);
+  }
+});
+
+test('Gateway processes commands with bot mention', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track messages sent to user
+  const messagesSent = [];
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messagesSent.push({ chatId, msg });
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Try a command with bot mention
+  const commandUpdate = {
+    update_id: 1,
+    message: {
+      text: '/help@mybot',
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(commandUpdate);
+  
+  ok(messagesSent.length > 0, 'Should process command with bot mention');
+  ok(messagesSent.some(msg => msg.msg.includes('help')), 'Should recognize command without bot mention');
+});
+
+test('Gateway handles unknown commands with error message', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track messages sent to user
+  const messagesSent = [];
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messagesSent.push({ chatId, msg });
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Try an unknown command
+  const commandUpdate = {
+    update_id: 1,
+    message: {
+      text: '/unknowncommand',
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(commandUpdate);
+  
+  ok(messagesSent.length > 0, 'Should send reply for unknown command');
+  ok(messagesSent.some(msg => msg.msg.includes('Unknown command') && msg.msg.includes('/help')), 'Should send error message with /help reference');
+});
+
+test('Gateway processes commands with arguments', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track messages sent to user
+  const messagesSent = [];
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messagesSent.push({ chatId, msg });
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Try a command with arguments
+  const commandUpdate = {
+    update_id: 1,
+    message: {
+      text: '/use 123 argument',
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(commandUpdate);
+  
+  ok(messagesSent.length > 0, 'Should process command with arguments');
+  ok(messagesSent.some(msg => msg.msg.includes('use') && msg.msg.includes('Coming soon')), 'Should recognize command with arguments');
+});
+
+test('Gateway sends normal text to Pi route (not commands)', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track messages sent to user
+  const messagesSent = [];
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messagesSent.push({ chatId, msg });
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Try a normal message (not a command)
+  const textUpdate = {
+    update_id: 1,
+    message: {
+      text: 'This is a normal text message to Pi',
+      from: { id: 123456 }, // Authorized user
+      chat: { id: -5555 }
+    }
+  };
+  
+  await gateway.handleUpdate(textUpdate);
+  
+  ok(messagesSent.length > 0, 'Should send reply for normal text');
+  ok(messagesSent.some(msg => msg.msg.includes('Message received by Pi')), 'Should identify normal text as going to Pi');
+});
+
+test('Gateway properly distinguishes between commands vs normal text based on leading slash', async () => {
+  const gw = await getGatewayModule().then(module => module.default || module);
+  
+  const mockConfig = {
+    telegramBotToken: 'fake-token',
+    telegramAllowedUserIds: [123456],
+    piSessionDir: '/fake/path'
+  };
+  
+  // Track messages sent to user  
+  const messagesSent = [];
+  const mockTelegram = {
+    sendMessage: async (chatId, msg) => {
+      messagesSent.push({ chatId, msg });
+    }
+  };
+  const mockPi = new EventEmitter();
+  const mockSessions = {};
+  const mockClock = {};
+  
+  const gateway = await gw.createBotGateway({ 
+    config: mockConfig, 
+    telegram: mockTelegram, 
+    pi: mockPi,
+    sessions: mockSessions,
+    clock: mockClock
+  });
+  
+  // Try commands to ensure they are processed (and don't go to Pi)
+  const commandUpdate = {
+    update_id: 1,
+    message: {
+      text: '/help',
+      from: { id: 123456 },
+      chat: { id: -5555 }
+    }
+  };
+  
+  messagesSent.length = 0;
+  await gateway.handleUpdate(commandUpdate);
+  ok(!messagesSent.some(msg => msg.msg.includes('Message received by Pi')), 'Commands should not trigger Pi route');
+  
+  // Anything starting with '/' should be treated as command, even if not recognized
+  const invalidSlashCmd = {
+    update_id: 2,
+    message: {
+      text: '/invalidcmd', // Text starting with / that is invalid command
+      from: { id: 123456 },
+      chat: { id: -5555 }
+    }
+  };
+  
+  messagesSent.length = 0;
+  await gateway.handleUpdate(invalidSlashCmd);
+  ok(!messagesSent.some(msg => msg.msg.includes('Message received by Pi')) && 
+     messagesSent.some(msg => msg.msg.includes('Unknown')), 'Invalid commands should show unknown command error, not go to Pi');
+     
+  // Non-slash text should go to Pi route
+  const normalTextNotSlash = {
+    update_id: 3,
+    message: {
+      text: 'Not a slash command', 
+      from: { id: 123456 },
+      chat: { id: -5555 }
+    }
+  };
+  
+  messagesSent.length = 0;
+  await gateway.handleUpdate(normalTextNotSlash);
+  ok(messagesSent.some(msg => msg.msg.includes('Message received by Pi')), 'Non-slash text should go to Pi route');
 });

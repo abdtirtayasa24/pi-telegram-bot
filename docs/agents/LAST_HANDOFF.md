@@ -1,18 +1,21 @@
 # Last Handoff
 
 ## Session Status
-Completed issue #3 - MVP: Telegram Auth Guard
+Completed issue #4 - MVP: Command Processing
 
 ## What Changed
-- Implemented authorization guard that checks Telegram user id against allowed IDs from config
-- Created middleware to reject unauthorized users with standardized message
-- Added logic for allowing authorized users to proceed to command processing
-- Enhanced logging to capture attempt metadata for authorized users only
-- Added comprehensive test suite verifying auth behavior with both authorized and unauthorized users
+- Implemented slash command recognition and dispatch system
+- Added parsing logic for commands with/without bot mentions (like /help and /help@botname)
+- Validated command format and dispatched to appropriate handlers
+- Built handling for unknown commands with standardized error message
+- Identified and separated commands from normal text (starting with /)
+- Ensured commands are not forwarded to Pi (only non-commands should go to Pi)
+- Added argument parsing for command parameters
+- Created comprehensive test suite covering all command scenarios
 
 ## Files Changed
-- `src/gateway.mjs`: Added authorization logic to handleUpdate method
-- `test/gateway.test.mjs`: Added tests for authentication guard functionality
+- `src/gateway.mjs`: Added command processing logic with distinction between commands and normal messages
+- `test/gateway.test.mjs`: Added extensive test coverage for command processing functionality
 
 ## Tests Run  
 - All configuration validation tests: PASS
@@ -22,7 +25,8 @@ Completed issue #3 - MVP: Telegram Auth Guard
 - Telegram client polling mechanism tests: PASS
 - Telegram client error handling tests: PASS
 - Authentication guard functionality tests: PASS
-- Total: 16/16 tests passing
+- Command processing functionality tests: PASS
+- Total: 22/22 tests passing
 
 ## Suggested Next Issue
-Issue #4: MVP: Command Processing - Build a command router that inspects message text for commands vs prompts, handles the /help and /start commands specifically, and prepares for other commands like session management. Commands start with '/'. Non-commands should go to prompt routing (to be implemented in later issues).
+Issue #5: MVP: Help and Start Commands - Implement the first concrete command handlers including detailed /help responses showing available commands and basic /start command greeting. These should return actual responses, not just coming soon messages as in issue #4.
