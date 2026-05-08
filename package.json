@@ -9,6 +9,7 @@
     },
     "scripts": {
         "start": "node src/index.mjs",
-        "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/pi-client.mjs && node --check src/telegram-client.mjs && node --check src/text.mjs"
+        "test": "node --test",
+    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/pi-client.mjs && node --check src/telegram-client.mjs && node --check src/text.mjs"
     }
 }
