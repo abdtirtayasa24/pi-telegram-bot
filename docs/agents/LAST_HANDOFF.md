@@ -1,29 +1,31 @@
 # Last Handoff
 
 ## Session Status
-Completed issue #1 - MVP Setup: Base Bot Gateway with config, tests, and PiWorker
+Completed issue #2 - MVP: Telegram long polling client
 
 ## What Changed
-- Created a comprehensive config module with validation for TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS and optional variables
-- Implemented PiClient with proper JSONL LF-only parsing for Pi RPC communication 
-- Created gateway core with dependency injection pattern: createBotGateway({ config, telegram, pi, sessions, clock })
-- Established complete Node.js built-in test infrastructure with behavior tests
-- Setup proper error handling and validation for all configuration requirements
+- Implemented full Telegram client with long polling capabilities using Node fetch
+- Created complete polling loop with update tracking via message offset
+- Added gateway update format conversion for Telegram updates
+- Built error handling for network issues
+- Added functionality to maintain position in the update queue
+- Updated main index to integrate all services properly
+- Created comprehensive test suite for long polling behavior
 
 ## Files Changed
-- `package.json`: Added test script
-- `src/config.mjs`: Environment variable loading and validation
-- `src/pi-client.mjs`: Subprocess management and Pi RPC communication  
-- `src/gateway.mjs`: Core gateway with dependency injection
-- `src/telegram-client.mjs`: Stub for dependency structure
-- `test/gateway.test.mjs`: Comprehensive test suite for MVP foundations
+- `src/telegram-client.mjs`: Complete implementation of Telegram long polling client
+- `src/index.mjs`: Main application entry point wiring services together
+- `test/telegram-client.test.mjs`: Complete test suite for Telegram client functionality
+- `src/gateway.mjs`: Updated to work with integrated Telegram client
 
 ## Tests Run  
 - All configuration validation tests: PASS
-- Gateway dependency injection tests: PASS  
+- Gateway dependency injection tests: PASS
 - PiClient subprocess spawning tests: PASS
-- HandleUpdate interface tests: PASS
-- Total: 6/6 tests passing
+- Telegram client conversion tests: PASS
+- Telegram client polling mechanism tests: PASS
+- Telegram client error handling tests: PASS 
+- Total: 13/13 tests passing
 
 ## Suggested Next Issue
-Issue #2: MVP: Telegram long polling client - Now that the foundation is set with proper config, testing, and dependency injection, implement the real Telegram client with long polling using Node fetch
+Issue #3: MVP: Telegram Auth Guard - Implement middleware to check incoming messages from authorized Telegram user IDs and reject untrusted users, using the allowlist from TELEGRAM_ALLOWED_USER_IDS
