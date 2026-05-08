@@ -51,15 +51,28 @@ export async function createBotGateway({ config, telegram, pi, sessions, clock }
       console.log('Received normal text message from authorized user:', messageText);
       
       // Forward the message as a prompt to Pi client if it's available
-      if (pi && typeof pi.prompt === 'function') {
+      if (pi && typeof pi.prompt === 'function' && typeof pi.getIsStreaming === 'function') {
         try {
-          // Send the original text as a prompt using Pi's prompt RPC command
-          await pi.prompt(messageText);
-          console.log('Normal text sent to Pi as prompt:', messageText);
+          const isStreaming = pi.getIsStreaming();
           
-          // Optional: Acknowledge the message was received by Pi
-          if (telegram && typeof telegram.sendMessage === 'function') {
-            await telegram.sendMessage(chatId, 'Message sent to Pi for processing.');
+          if (isStreaming) {
+            // If Pi is currently streaming, send as a follow-up prompt
+            await pi.prompt(messageText, "followUp");
+            console.log('Normal text sent to Pi as follow-up:', messageText);
+            
+            // Provide immediate feedback to user that it's queued
+            if (telegram && typeof telegram.sendMessage === 'function') {
+              await telegram.sendMessage(chatId, 'Queued as follow-up.');
+            }
+          } else {
+            // Otherwise send as normal prompt
+            await pi.prompt(messageText);
+            console.log('Normal text sent to Pi as prompt:', messageText);
+            
+            // Acknowledge the message was received by Pi
+            if (telegram && typeof telegram.sendMessage === 'function') {
+              await telegram.sendMessage(chatId, 'Message sent to Pi for processing.');
+            }
           }
         } catch (error) {
           console.error('Error sending normal text as prompt to Pi:', error);

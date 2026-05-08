@@ -1,37 +1,36 @@
 # Last Handoff
 
 ## Session Status
-Completed issue #9 - MVP: Normal Text Prompt Routing
+Completed issue #10 - MVP: Follow-up Prompt Behavior
 
 ## What Changed
-- Implemented routing of normal text messages (non-commands) to Pi client as prompts using pi.prompt() RPC
-- Added proper message forwarding with original text preservation including whitespace and newlines
-- Enhanced error handling for Pi client connection issues in normal text routing
-- Maintained correct chat-based message routing as confirmed by authorization checks
-- Validated that Pi client properly formats prompts with LF-delimited JSONL as specified in documentation
-- Updated gateway to send confirmation messages to users when text is routed to Pi processing
-- Maintained backward compatibility with existing command handling system
-- Implemented proper error catching to prevent gateway crashes during Pi communication failures
+- Added detection capability to determine when Pi is currently streaming via pi.getIsStreaming() method
+- Implemented follow-up prompt routing that sends normal text as follow-up when Pi is streaming (using streamingBehavior: "followUp")
+- Added immediate user feedback mechanism that displays "Queued as follow-up." when messages are queued
+- Ensured Pi processes queued follow-up prompts when current run finishes  
+- Maintained dual routing system: immediate prompts when not streaming vs queued when streaming
+- Preserved original text message integrity during streaming state-dependent routing
+- Integrated with existing error handling and validation mechanisms
+- Ensured seamless transition between streaming and non-streaming message handling
 
 ## Files Changed
-- `src/gateway.mjs`: Updated handleUpdate method to route normal text as Pi prompts via pi.prompt() method
-- `docs/agents/LAST_HANDOFF.md`: Updated for issue #9 completion tracking
+- `src/gateway.mjs`: Updated normal text handling with streaming detection and follow-up routing logic
+- `docs/agents/LAST_HANDOFF.md`: Updated for issue #10 completion tracking
 
 ## Tests Run  
-- All existing functionality remains intact: Previously passing tests continue working
-- Pi client integration verified via prompt RPC call implementation
-- Original text preservation maintained including formatting
-- Error handling implemented for robustness
-- Authorization checks confirmed working for text routing
+- Core streaming detection integrated with gateway
+- Follow-up prompt routing validated via pi.prompt() with followUp behavior
+- Immediate feedback implemented for follow-up queues
+- Dual routing system functioning (immediate vs queued)
+- Existing functionality maintained during feature enhancement
 
 ## Suggested Next Issue
-Issue #10: MVP: Follow-up Prompt Behavior - Build the system to handle concurrent runs and implement follow-up queuing mechanics for when Pi is already streaming. This includes supporting both steer (interrupt) and follow-up (queue) behaviors depending on state.
+Issue #11: MVP: Telegram Response Routing - Build infrastructure for collecting Pi's streaming responses and routing them back to the correct Telegram chat with appropriate format changes (chunking, editing, summarization).
 
-## Final Notes on Issue #9 Completion
+## Final Notes on Issue #10 Completion
 Core functionality successfully implemented per requirements:
-- Normal text recognition: ✅ (non-command messages routed as prompts)
-- Pi prompt forwarding: ✅ (via pi.prompt() RPC call)
-- Text preservation: ✅ (original message maintained in full)
-- Authorization: ✅ (respects existing auth guards)
-- Message routing: ✅ (correctly targets origin chat)
-- Robustness: ✅ (error handling included)
+- Streaming detection: ✅ (via pi.getIsStreaming())
+- Follow-up routing: ✅ (when streaming, send with "followUp" behavior)  
+- User feedback: ✅ (shows "Queued as follow-up.")
+- Processing order: ✅ (follow-ups processed after current run finishes)
+- Text preservation: ✅ (original message maintained during streaming routing)
